@@ -121,10 +121,10 @@ All responses are JSON with `Cache-Control: no-store`.
 
 | Route | Success | Errors |
 | --- | --- | --- |
-| `POST /api/checkout` body `{"plan":"monthly"\|"yearly"}` | `200 {"url"}`: redirect the browser there | `400` bad body or unknown plan, `401`, `409 already_subscribed` (use the portal), `502 stripe_error` |
+| `POST /api/checkout` body `{"plan":"monthly"\|"yearly"}` | `200 {"url"}`: redirect the browser there | `400` bad body or unknown plan, `401`, `409 already_subscribed` (use the portal), `502 stripe_error` (including when Stripe cannot be asked about existing subscriptions) |
 | `POST /api/portal` | `200 {"url"}` | `401`, `404 no_billing_account` (never started checkout), `502 stripe_error` |
 | `GET /api/entitlement` | `200 {"plan","reason","graceEndsAt","currentPeriodEnd","cancelAt","lastPaymentFailedAt"}` | `401` |
-| `POST /api/stripe/webhook` | `200 {"received":true,"outcome":"processed"\|"duplicate"\|"ignored"}` | `400` missing or invalid signature, `500 processing_failed` (Stripe will retry) |
+| `POST /api/stripe/webhook` | `200 {"received":true,"outcome":"processed"\|"duplicate"\|"ignored"}` | `400` missing or invalid signature, `413` body over 1 MiB, `500 processing_failed` (Stripe will retry) |
 
 Clients never send price ids; the plan key is mapped to a price on the server.
 
@@ -159,7 +159,18 @@ Implemented in `src/domain/entitlement.ts`, with no Stripe or I/O dependencies.
 | `canceled`, `unpaid`, `paused`, `incomplete`, `incomplete_expired`, any unknown status | `free` |
 | no subscription | `free` |
 
-The grace clock starts when the subscription enters `past_due` and does not restart on Stripe's payment retries. A user with several subscription rows (cancelled, then resubscribed) is `pro` if any of them is. While a subscription is `active`, `trialing`, `past_due`, `unpaid` or `paused`, a new Checkout is refused with `409` so a customer cannot end up with two parallel subscriptions.
+The grace clock starts when the subscription enters `past_due` and does not restart on Stripe's payment retries. A user with several subscription rows (cancelled, then resubscribed) is `pro` if any of them is.
+
+### Duplicate-subscription guard (best effort)
+
+Before creating a Checkout Session, `POST /api/checkout` answers `409` if either of these shows a live subscription (`active`, `trialing`, `past_due`, `unpaid`, `paused`):
+
+1. the app's own records for the user, or
+2. Stripe itself, listing the subscriptions of the user's stored customer (this covers the gap between paying and the webhook arriving, when the app's records are still empty).
+
+If Stripe cannot be asked, the request fails with `502` instead of proceeding. A user's first checkout has no Stripe customer yet, so Stripe is not queried.
+
+What this does not guarantee: a Checkout Session is an offer, and the subscription exists only once the customer completes payment. Two Sessions created before either is paid (two tabs, two devices, two simultaneous requests) can both be completed; this starter does not prevent that. Entitlement stays correct in that case because a user is `pro` if any of their subscriptions is, but they would be billed twice until one is cancelled in the Billing Portal or the Dashboard.
 
 ## Webhook handling
 
@@ -172,6 +183,8 @@ The grace clock starts when the subscription enters `past_due` and does not rest
 | anything else | `200`, ignored, not recorded. |
 
 The owner of a subscription event is the user linked to its Stripe customer, falling back to `subscription.metadata.user_id`. Events that match neither are acknowledged and logged, not retried, so subscriptions that belong to other products on the same Stripe account cannot wedge the endpoint.
+
+Because the endpoint is public, bodies are limited to 1 MiB (`MAX_WEBHOOK_BODY_BYTES` in `src/billing/handlers/webhook.ts`) and the limit is applied before the signature is checked: a larger `Content-Length` is answered with `413` without reading the body, and a body with a missing or understated `Content-Length` is cut off once the streamed bytes pass the limit. The signature is verified over the raw bytes that were read.
 
 ## Storage
 
@@ -213,10 +226,11 @@ No network access and no Stripe keys are needed. The Stripe client is injected: 
 | --- | --- |
 | `tests/entitlement.test.ts` | Status mapping and grace-period boundaries (one second before the end, exactly at the end, zero and fractional grace days, unknown start time, several subscriptions per user). |
 | `tests/webhook.test.ts` | Missing, wrong-secret, tampered, stale-timestamp and non-JSON payloads return `400`. Duplicate and concurrently racing events are applied once. A failed handler leaves the event unrecorded so the retry succeeds. Late events do not downgrade newer state (all six delivery orders converge). Same-second ties are resolved by asking Stripe. Each handled event type. |
-| `tests/checkout.test.ts` | Exact Checkout Session parameters including the tax options, customer creation and reuse, server-side prices, `409` for a live subscription, Stripe failures mapped to `502` without leaking details, Portal and entitlement routes. |
+| `tests/body-limit.test.ts` | The 1 MiB webhook body cap: oversized `Content-Length` rejected without reading, streamed and mislabelled bodies cut off early, a signed body of exactly 1 MiB accepted and one byte more rejected. |
+| `tests/checkout.test.ts` | Exact Checkout Session parameters including the tax options, customer creation and reuse, server-side prices, `409` for a live subscription in our records or only in Stripe, `502` when Stripe cannot be asked, Stripe failures mapped to `502` without leaking details, Portal and entitlement routes. |
 | `tests/repository.test.ts` | One contract suite for both repositories (ordering, duplicates, past-due clock, payment failures, atomic rollback), plus SQLite persistence across reopen and rollback after a mid-transaction failure. |
 | `tests/routes.test.ts` | The real route modules over a SQLite file: checkout, signed webhook activation, portal, cancellation, user isolation, behaviour when configuration is missing. |
-| `tests/config.test.ts`, `tests/mapping.test.ts` | Environment validation, auth resolvers, Stripe object mapping. |
+| `tests/config.test.ts`, `tests/container.test.ts`, `tests/mapping.test.ts` | Environment validation including the production refusal of demo auth and its startup warning, auth resolvers, Stripe object mapping. |
 
 What the automated tests do not cover: a live round-trip against Stripe's servers (real Checkout page, real Portal, real tax calculation). Use the quick start with your test-mode account for that.
 
