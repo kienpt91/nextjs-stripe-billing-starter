@@ -17,7 +17,7 @@ export async function handleEntitlement(request: Request, deps: BillingDeps): Pr
     reason,
     graceEndsAt,
     currentPeriodEnd: subscription?.currentPeriodEnd ?? null,
-    cancelAtPeriodEnd: subscription?.cancelAtPeriodEnd ?? false,
+    cancelAt: subscription?.cancelAt ?? null,
     lastPaymentFailedAt: subscription?.lastPaymentFailedAt ?? null,
   });
 }

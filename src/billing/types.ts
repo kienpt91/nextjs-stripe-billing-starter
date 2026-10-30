@@ -12,7 +12,8 @@ export interface SubscriptionSnapshot {
   status: string;
   priceId: string | null;
   currentPeriodEnd: number | null;
-  cancelAtPeriodEnd: boolean;
+  /** When the subscription is scheduled to end (unix seconds), or null if no cancellation is scheduled. */
+  cancelAt: number | null;
 }
 
 export interface SubscriptionRecord extends SubscriptionSnapshot {

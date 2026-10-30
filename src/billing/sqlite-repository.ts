@@ -24,7 +24,7 @@ CREATE TABLE IF NOT EXISTS billing_subscriptions (
   status TEXT NOT NULL,
   price_id TEXT,
   current_period_end INTEGER,
-  cancel_at_period_end INTEGER NOT NULL,
+  cancel_at INTEGER,
   state_as_of INTEGER NOT NULL,
   past_due_since INTEGER,
   last_payment_failed_at INTEGER,
@@ -51,7 +51,7 @@ function toRecord(row: Row): SubscriptionRecord {
     status: row.status as string,
     priceId: row.price_id as string | null,
     currentPeriodEnd: row.current_period_end as number | null,
-    cancelAtPeriodEnd: row.cancel_at_period_end === 1,
+    cancelAt: row.cancel_at as number | null,
     stateAsOf: row.state_as_of as number,
     pastDueSince: row.past_due_since as number | null,
     lastPaymentFailedAt: row.last_payment_failed_at as number | null,
@@ -92,7 +92,7 @@ export class SqliteBillingRepository implements BillingRepository {
     this.upsertSubscription = this.db.prepare(`
       INSERT INTO billing_subscriptions (
         stripe_subscription_id, user_id, stripe_customer_id, status, price_id, current_period_end,
-        cancel_at_period_end, state_as_of, past_due_since, last_payment_failed_at, last_failed_invoice_id
+        cancel_at, state_as_of, past_due_since, last_payment_failed_at, last_failed_invoice_id
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT (stripe_subscription_id) DO UPDATE SET
         user_id = excluded.user_id,
@@ -100,7 +100,7 @@ export class SqliteBillingRepository implements BillingRepository {
         status = excluded.status,
         price_id = excluded.price_id,
         current_period_end = excluded.current_period_end,
-        cancel_at_period_end = excluded.cancel_at_period_end,
+        cancel_at = excluded.cancel_at,
         state_as_of = excluded.state_as_of,
         past_due_since = excluded.past_due_since,
         last_payment_failed_at = excluded.last_payment_failed_at,
@@ -124,7 +124,7 @@ export class SqliteBillingRepository implements BillingRepository {
           r.status,
           r.priceId,
           r.currentPeriodEnd,
-          r.cancelAtPeriodEnd ? 1 : 0,
+          r.cancelAt,
           r.stateAsOf,
           r.pastDueSince,
           r.lastPaymentFailedAt,

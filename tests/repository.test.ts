@@ -17,7 +17,7 @@ function snapshot(overrides: Partial<SubscriptionSnapshot> = {}): SubscriptionSn
     status: 'active',
     priceId: 'price_monthly',
     currentPeriodEnd: T0 + 30 * 86_400,
-    cancelAtPeriodEnd: false,
+    cancelAt: null,
     ...overrides,
   };
 }

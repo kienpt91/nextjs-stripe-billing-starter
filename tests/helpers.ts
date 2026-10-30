@@ -1,7 +1,7 @@
 import Stripe from 'stripe';
 import type { BillingDeps, BillingStripe, Logger } from '@/billing/deps';
 import { InMemoryBillingRepository } from '@/billing/memory-repository';
-import type { BillingRepository } from '@/billing/types';
+import type { BillingRepository, SubscriptionSnapshot } from '@/billing/types';
 import { demoHeaderAuth } from '@/lib/auth';
 import type { BillingConfig } from '@/lib/config';
 
@@ -138,6 +138,7 @@ export interface SubscriptionOptions {
   priceId?: string;
   periodEnd?: number;
   cancelAtPeriodEnd?: boolean;
+  cancelAt?: number | null;
 }
 
 export function subscriptionObject(options: SubscriptionOptions = {}): Stripe.Subscription {
@@ -148,12 +149,37 @@ export function subscriptionObject(options: SubscriptionOptions = {}): Stripe.Su
     customer,
     status,
     cancel_at_period_end: options.cancelAtPeriodEnd ?? false,
+    cancel_at: options.cancelAt ?? null,
     metadata: userId === null ? {} : { user_id: userId },
     items: {
       object: 'list',
       data: [{ id: 'si_1', price: { id: priceId }, current_period_end: options.periodEnd ?? T0 + 30 * DAY }],
     },
   } as unknown as Stripe.Subscription;
+}
+
+/** Stores a subscription directly, bypassing webhooks, for tests that start from existing state. */
+export async function seedSubscription(
+  repo: BillingRepository,
+  overrides: Partial<SubscriptionSnapshot> & { userId?: string } = {},
+): Promise<void> {
+  const { userId = 'user_1', ...snapshot } = overrides;
+  await repo.commitEvent({ id: `evt_seed_${userId}_${snapshot.subscriptionId ?? 'sub_1'}`, type: 'seed', created: T0, receivedAt: T0 }, [
+    {
+      kind: 'upsert_subscription',
+      userId,
+      asOf: T0,
+      snapshot: {
+        subscriptionId: 'sub_1',
+        customerId: 'cus_1',
+        status: 'active',
+        priceId: 'price_monthly_test',
+        currentPeriodEnd: null,
+        cancelAt: null,
+        ...snapshot,
+      },
+    },
+  ]);
 }
 
 let eventCounter = 0;

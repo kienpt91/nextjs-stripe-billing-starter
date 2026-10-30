@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { handleCheckout } from '@/billing/handlers/checkout';
 import { handleEntitlement } from '@/billing/handlers/entitlement';
 import { handlePortal } from '@/billing/handlers/portal';
-import { T0, createContext, jsonRequest, userHeaders } from './helpers';
+import { T0, createContext, jsonRequest, seedSubscription, userHeaders } from './helpers';
 import type { TestContext } from './helpers';
 
 const CHECKOUT_URL = 'http://localhost/api/checkout';
@@ -98,6 +98,19 @@ describe('POST /api/checkout', () => {
     expect(ctx.fake.calls.checkoutCreate.map((params) => params.customer)).toEqual(['cus_fake_1', 'cus_fake_1', 'cus_fake_2']);
   });
 
+  it('converges two simultaneous first checkouts onto a single stored customer', async () => {
+    const ctx = createContext();
+    const checkout = () => handleCheckout(jsonRequest(CHECKOUT_URL, { plan: 'monthly' }, userHeaders('user_1')), ctx.deps);
+
+    const responses = await Promise.all([checkout(), checkout()]);
+
+    expect(responses.map((response) => response.status)).toEqual([200, 200]);
+    // The fake is not idempotent, so Stripe "created" two customers; only the first link is kept and used.
+    const stored = await ctx.repo.getStripeCustomerId('user_1');
+    expect(stored).toBe('cus_fake_1');
+    expect(ctx.fake.calls.checkoutCreate.map((params) => params.customer)).toEqual([stored, stored]);
+  });
+
   it('omits the customer email when the signed-in user has none', async () => {
     const ctx = createContext();
     await handleCheckout(jsonRequest(CHECKOUT_URL, { plan: 'monthly' }, userHeaders('user_1')), ctx.deps);
@@ -108,14 +121,7 @@ describe('POST /api/checkout', () => {
     'refuses a second subscription while one is %s',
     async (status) => {
       const ctx = createContext();
-      await ctx.repo.commitEvent({ id: 'evt_seed', type: 'seed', created: T0, receivedAt: T0 }, [
-        {
-          kind: 'upsert_subscription',
-          userId: 'user_1',
-          asOf: T0,
-          snapshot: { subscriptionId: 'sub_1', customerId: 'cus_1', status, priceId: 'price_monthly_test', currentPeriodEnd: null, cancelAtPeriodEnd: false },
-        },
-      ]);
+      await seedSubscription(ctx.repo, { status });
 
       const response = await handleCheckout(jsonRequest(CHECKOUT_URL, { plan: 'monthly' }, userHeaders('user_1')), ctx.deps);
 
@@ -128,14 +134,7 @@ describe('POST /api/checkout', () => {
   it('lets a user with only a canceled subscription subscribe again, on the same customer', async () => {
     const ctx = createContext();
     await ctx.repo.linkCustomer('user_1', 'cus_1');
-    await ctx.repo.commitEvent({ id: 'evt_seed', type: 'seed', created: T0, receivedAt: T0 }, [
-      {
-        kind: 'upsert_subscription',
-        userId: 'user_1',
-        asOf: T0,
-        snapshot: { subscriptionId: 'sub_old', customerId: 'cus_1', status: 'canceled', priceId: null, currentPeriodEnd: null, cancelAtPeriodEnd: false },
-      },
-    ]);
+    await seedSubscription(ctx.repo, { subscriptionId: 'sub_old', status: 'canceled', priceId: null });
 
     const response = await handleCheckout(jsonRequest(CHECKOUT_URL, { plan: 'monthly' }, userHeaders('user_1')), ctx.deps);
 
@@ -213,23 +212,16 @@ describe('GET /api/entitlement', () => {
       reason: 'no_subscription',
       graceEndsAt: null,
       currentPeriodEnd: null,
-      cancelAtPeriodEnd: false,
+      cancelAt: null,
       lastPaymentFailedAt: null,
     });
   });
 
   it("does not expose another user's subscription", async () => {
     const ctx = createContext();
-    await ctx.repo.commitEvent({ id: 'evt_seed', type: 'seed', created: T0, receivedAt: T0 }, [
-      {
-        kind: 'upsert_subscription',
-        userId: 'user_1',
-        asOf: T0,
-        snapshot: { subscriptionId: 'sub_1', customerId: 'cus_1', status: 'active', priceId: null, currentPeriodEnd: T0 + 100, cancelAtPeriodEnd: true },
-      },
-    ]);
+    await seedSubscription(ctx.repo, { currentPeriodEnd: T0 + 100, cancelAt: T0 + 100 });
 
-    expect(await body(await get(ctx, userHeaders('user_1')))).toMatchObject({ plan: 'pro', cancelAtPeriodEnd: true, currentPeriodEnd: T0 + 100 });
+    expect(await body(await get(ctx, userHeaders('user_1')))).toMatchObject({ plan: 'pro', cancelAt: T0 + 100, currentPeriodEnd: T0 + 100 });
     expect(await body(await get(ctx, userHeaders('user_2')))).toMatchObject({ plan: 'free', reason: 'no_subscription' });
   });
 });
