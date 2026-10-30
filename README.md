@@ -73,7 +73,7 @@ Stripe-side setup (test mode first):
 
 In production, create a webhook endpoint in the Dashboard pointing at `https://<your-domain>/api/stripe/webhook`, subscribe it to the same four events, and use its signing secret.
 
-API version: payload shapes follow the API version of the webhook endpoint. The code reads `invoice.parent.subscription_details.subscription` and the billing period from `items.data[].current_period_end`, as typed by the pinned SDK (`stripe@23`, API version `2026-09-30.endive`). Create the endpoint on that version if your account default is older.
+API version: payload shapes follow the API version of the webhook endpoint. The code reads `invoice.parent.subscription_details.subscription` and the billing period from `items.data[].current_period_end`, as typed by the pinned SDK (`stripe@22.6.2`, API version `2026-08-26.dahlia`). Create the endpoint on that version if your account default is older.
 
 ### Try it without Stripe
 

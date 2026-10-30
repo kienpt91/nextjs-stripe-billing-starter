@@ -17,16 +17,16 @@
     "webhook:send": "node scripts/send-test-event.mjs"
   },
   "dependencies": {
-    "next": "^16.4.2",
-    "react": "^19.3.1",
-    "react-dom": "^19.3.1",
-    "stripe": "^23.0.0"
+    "next": "16.3.7",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "stripe": "22.6.2"
   },
   "devDependencies": {
-    "@types/node": "^24.19.2",
-    "@types/react": "^19.3.0",
-    "@types/react-dom": "^19.3.0",
-    "typescript": "~5.9.3",
-    "vitest": "^5.0.5"
+    "@types/node": "24.19.0",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "typescript": "5.9.3",
+    "vitest": "5.0.2"
   }
 }
