@@ -27,9 +27,11 @@ export interface BillingStripe {
   };
   subscriptions: {
     retrieve(id: string): Promise<Stripe.Subscription>;
+    /** Auto-paginating. Without `status`, Stripe lists every subscription that has not been canceled. */
+    list(params: Stripe.SubscriptionListParams): AsyncIterable<Pick<Stripe.Subscription, 'id' | 'status'>>;
   };
   webhooks: {
-    constructEvent(payload: string, header: string, secret: string): Stripe.Event;
+    constructEvent(payload: string | Uint8Array, header: string, secret: string): Stripe.Event;
   };
 }
 

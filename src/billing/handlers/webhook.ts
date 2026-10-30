@@ -1,14 +1,19 @@
 import type Stripe from 'stripe';
+import { BodyTooLargeError, readBodyLimited } from '@/lib/body';
 import { errorMessage } from '@/lib/errors';
 import { json } from '@/lib/http';
 import type { BillingDeps } from '../deps';
 import { idOf, snapshotOf } from '../stripe-mapping';
 import type { Effect } from '../types';
 
+/** Largest webhook body accepted, checked before the signature so unauthenticated callers cannot make us buffer more. */
+export const MAX_WEBHOOK_BODY_BYTES = 1024 * 1024;
+
 /**
  * POST /api/stripe/webhook
  *
- * 400  signature missing or invalid (nothing is read from the body)
+ * 400  signature missing or invalid
+ * 413  body larger than MAX_WEBHOOK_BODY_BYTES (rejected without verifying or buffering all of it)
  * 200  handled, duplicate, or an event type/shape we deliberately ignore
  * 500  our processing failed; nothing was persisted, so Stripe's retry starts clean
  */
@@ -16,8 +21,18 @@ export async function handleStripeWebhook(request: Request, deps: BillingDeps): 
   const signature = request.headers.get('stripe-signature');
   if (!signature) return json(400, { error: 'missing_signature' });
 
-  // Verification needs the exact bytes Stripe signed, so read the body as text and never re-serialize it.
-  const payload = await request.text();
+  // Verification needs the exact bytes Stripe signed, so read raw bytes and never re-serialize the body.
+  let payload: Uint8Array;
+  try {
+    payload = await readBodyLimited(request, MAX_WEBHOOK_BODY_BYTES);
+  } catch (error) {
+    if (error instanceof BodyTooLargeError) {
+      deps.logger.warn('webhook_body_too_large', { maxBytes: MAX_WEBHOOK_BODY_BYTES });
+      return json(413, { error: 'payload_too_large' });
+    }
+    deps.logger.warn('webhook_body_unreadable', { error: errorMessage(error) });
+    return json(400, { error: 'unreadable_body' });
+  }
 
   let event: Stripe.Event;
   try {

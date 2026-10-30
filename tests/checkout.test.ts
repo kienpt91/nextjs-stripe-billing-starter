@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { handleCheckout } from '@/billing/handlers/checkout';
 import { handleEntitlement } from '@/billing/handlers/entitlement';
 import { handlePortal } from '@/billing/handlers/portal';
-import { T0, createContext, jsonRequest, seedSubscription, userHeaders } from './helpers';
+import { T0, createContext, jsonRequest, seedSubscription, subscriptionObject, userHeaders } from './helpers';
 import type { TestContext } from './helpers';
 
 const CHECKOUT_URL = 'http://localhost/api/checkout';
@@ -141,6 +141,72 @@ describe('POST /api/checkout', () => {
     expect(response.status).toBe(200);
     expect(ctx.fake.calls.customersCreate).toEqual([]);
     expect(ctx.fake.calls.checkoutCreate[0]?.customer).toBe('cus_1');
+  });
+
+  describe('when our records have not caught up with Stripe yet', () => {
+    const checkout = (ctx: TestContext) =>
+      handleCheckout(jsonRequest(CHECKOUT_URL, { plan: 'monthly' }, userHeaders('user_1')), ctx.deps);
+
+    it.each(['active', 'trialing', 'past_due', 'unpaid', 'paused'])(
+      'refuses a new Session while Stripe shows a %s subscription the webhook has not delivered',
+      async (status) => {
+        const ctx = createContext();
+        await ctx.repo.linkCustomer('user_1', 'cus_1');
+        ctx.fake.subscriptions.set('sub_paid_moments_ago', subscriptionObject({ id: 'sub_paid_moments_ago', customer: 'cus_1', status }));
+
+        const response = await checkout(ctx);
+
+        expect(response.status).toBe(409);
+        expect((await body(response)).error).toBe('already_subscribed');
+        expect(ctx.fake.calls.subscriptionsList).toEqual([{ customer: 'cus_1', limit: 100 }]);
+        expect(ctx.fake.calls.checkoutCreate).toEqual([]);
+      },
+    );
+
+    it('proceeds when Stripe only has incomplete or canceled subscriptions for the customer', async () => {
+      const ctx = createContext();
+      await ctx.repo.linkCustomer('user_1', 'cus_1');
+      ctx.fake.subscriptions.set('sub_a', subscriptionObject({ id: 'sub_a', customer: 'cus_1', status: 'incomplete' }));
+      ctx.fake.subscriptions.set('sub_b', subscriptionObject({ id: 'sub_b', customer: 'cus_1', status: 'incomplete_expired' }));
+      ctx.fake.subscriptions.set('sub_c', subscriptionObject({ id: 'sub_c', customer: 'cus_1', status: 'canceled' }));
+
+      expect((await checkout(ctx)).status).toBe(200);
+    });
+
+    it("is not blocked by another customer's subscription", async () => {
+      const ctx = createContext();
+      await ctx.repo.linkCustomer('user_1', 'cus_1');
+      ctx.fake.subscriptions.set('sub_other', subscriptionObject({ id: 'sub_other', customer: 'cus_other', status: 'active' }));
+
+      expect((await checkout(ctx)).status).toBe(200);
+      expect(ctx.fake.calls.checkoutCreate).toHaveLength(1);
+    });
+
+    it('does not ask Stripe on a first checkout, when there is no customer yet', async () => {
+      const ctx = createContext();
+      expect((await checkout(ctx)).status).toBe(200);
+      expect(ctx.fake.calls.subscriptionsList).toEqual([]);
+    });
+
+    it('does not ask Stripe when our own records already show a live subscription', async () => {
+      const ctx = createContext();
+      await ctx.repo.linkCustomer('user_1', 'cus_1');
+      await seedSubscription(ctx.repo, { status: 'active' });
+      expect((await checkout(ctx)).status).toBe(409);
+      expect(ctx.fake.calls.subscriptionsList).toEqual([]);
+    });
+
+    it('fails closed with 502 when Stripe cannot be asked, and creates no Session', async () => {
+      const ctx = createContext();
+      await ctx.repo.linkCustomer('user_1', 'cus_1');
+      ctx.fake.failNext.list = new Error('rate limited');
+
+      const response = await checkout(ctx);
+
+      expect(response.status).toBe(502);
+      expect(ctx.fake.calls.checkoutCreate).toEqual([]);
+      expect(ctx.logs).toContainEqual({ level: 'error', message: 'checkout_failed', fields: { userId: 'user_1', error: 'rate limited' } });
+    });
   });
 
   it('returns 502 without leaking Stripe error details, and logs them', async () => {

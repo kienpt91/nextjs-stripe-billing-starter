@@ -20,18 +20,28 @@ export interface FakeStripeCalls {
   checkoutCreate: Stripe.Checkout.SessionCreateParams[];
   portalCreate: Stripe.BillingPortal.SessionCreateParams[];
   subscriptionsRetrieve: string[];
+  subscriptionsList: Stripe.SubscriptionListParams[];
 }
 
 export interface FakeStripe {
   stripe: BillingStripe;
   calls: FakeStripeCalls;
-  /** What `subscriptions.retrieve` answers with, keyed by subscription id. */
+  /**
+   * Stripe's view of the world. `subscriptions.retrieve` answers from it by id, and `subscriptions.list`
+   * lists the ones for a customer that are not canceled, which is Stripe's default when no status is given.
+   */
   subscriptions: Map<string, Stripe.Subscription>;
-  failNext: { checkout?: Error; portal?: Error; retrieve?: Error };
+  failNext: { checkout?: Error; portal?: Error; retrieve?: Error; list?: Error };
 }
 
 export function createFakeStripe(): FakeStripe {
-  const calls: FakeStripeCalls = { customersCreate: [], checkoutCreate: [], portalCreate: [], subscriptionsRetrieve: [] };
+  const calls: FakeStripeCalls = {
+    customersCreate: [],
+    checkoutCreate: [],
+    portalCreate: [],
+    subscriptionsRetrieve: [],
+    subscriptionsList: [],
+  };
   const subscriptions = new Map<string, Stripe.Subscription>();
   const failNext: FakeStripe['failNext'] = {};
   let customerCounter = 0;
@@ -69,6 +79,13 @@ export function createFakeStripe(): FakeStripe {
         const subscription = subscriptions.get(id);
         if (!subscription) throw new Error(`No such subscription: '${id}'`);
         return subscription;
+      },
+      async *list(params) {
+        calls.subscriptionsList.push(params);
+        if (failNext.list) throw failNext.list;
+        for (const subscription of subscriptions.values()) {
+          if (subscription.customer === params.customer && subscription.status !== 'canceled') yield subscription;
+        }
       },
     },
     webhooks: signingStripe.webhooks,

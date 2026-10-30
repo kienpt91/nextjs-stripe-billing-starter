@@ -20,13 +20,18 @@ export async function handleCheckout(request: Request, deps: BillingDeps): Promi
   }
 
   // A second Checkout would create a second, parallel subscription and bill the customer twice.
+  // Cheap check against our own records first; Stripe itself is asked below, once we know the customer.
   const existing = await deps.repo.listSubscriptionsForUser(user.id);
   if (existing.some((subscription) => isLiveSubscriptionStatus(subscription.status))) {
     return json(409, { error: 'already_subscribed', message: 'Manage the current subscription in the billing portal.' });
   }
 
   try {
-    const customerId = await ensureStripeCustomer(deps, user);
+    const existingCustomerId = await deps.repo.getStripeCustomerId(user.id);
+    if (existingCustomerId && (await hasLiveStripeSubscription(deps, existingCustomerId))) {
+      return json(409, { error: 'already_subscribed', message: 'Manage the current subscription in the billing portal.' });
+    }
+    const customerId = await ensureStripeCustomer(deps, user, existingCustomerId);
     const session = await deps.stripe.checkout.sessions.create({
       mode: 'subscription',
       customer: customerId,
@@ -65,8 +70,7 @@ async function readPlan(request: Request): Promise<PlanKey | null> {
 }
 
 /** One Stripe customer per app user. Reused on every later checkout. */
-async function ensureStripeCustomer(deps: BillingDeps, user: AuthUser): Promise<string> {
-  const existing = await deps.repo.getStripeCustomerId(user.id);
+async function ensureStripeCustomer(deps: BillingDeps, user: AuthUser, existing: string | null): Promise<string> {
   if (existing) return existing;
 
   const params: Stripe.CustomerCreateParams = { metadata: { user_id: user.id } };
@@ -74,5 +78,16 @@ async function ensureStripeCustomer(deps: BillingDeps, user: AuthUser): Promise<
   // The idempotency key makes two simultaneous first checkouts converge on one Stripe customer.
   const customer = await deps.stripe.customers.create(params, { idempotencyKey: `billing-customer-${user.id}` });
   return deps.repo.linkCustomer(user.id, customer.id);
+}
+
+/**
+ * Asks Stripe, not our database, whether the customer already has a live subscription. Our copy
+ * only updates when a webhook arrives, so right after a purchase it can still say "none".
+ */
+async function hasLiveStripeSubscription(deps: BillingDeps, customerId: string): Promise<boolean> {
+  for await (const subscription of deps.stripe.subscriptions.list({ customer: customerId, limit: 100 })) {
+    if (isLiveSubscriptionStatus(subscription.status)) return true;
+  }
+  return false;
 }
 
