@@ -69,7 +69,7 @@ Stripe-side setup (test mode first):
    ```
 
    The CLI prints `Ready! Your webhook signing secret is whsec_...`. Put that value in `STRIPE_WEBHOOK_SECRET` and restart `npm run dev` (environment files are read at startup).
-5. Open the app, click **Subscribe**, and pay with a Stripe test card. After the redirect back, click **Check entitlement**; it flips to `pro` once the webhook has been processed.
+5. Set `ALLOW_DEMO_AUTH=true` in `.env.local` (and restart `npm run dev`) so the demo page can identify a user, open the app, click **Subscribe**, and pay with a Stripe test card. After the redirect back, click **Check entitlement**; it flips to `pro` once the webhook has been processed.
 
 In production, create a webhook endpoint in the Dashboard pointing at `https://<your-domain>/api/stripe/webhook`, subscribe it to the same four events, and use its signing secret.
 
@@ -77,7 +77,7 @@ API version: payload shapes follow the API version of the webhook endpoint. The 
 
 ### Try it without Stripe
 
-`scripts/send-test-event.mjs` signs and sends subscription and payment-failure events to your running dev server, which is enough to watch idempotency, ordering and the grace period work. It reads `STRIPE_WEBHOOK_SECRET` from `.env.local`; any `whsec_...` value works locally. The demo user is `demo-user-1`, sent as a header because `ALLOW_DEMO_AUTH=true` is set in `.env.example`.
+`scripts/send-test-event.mjs` signs and sends subscription and payment-failure events to your running dev server, which is enough to watch idempotency, ordering and the grace period work. It reads `STRIPE_WEBHOOK_SECRET` from `.env.local`; any `whsec_...` value works locally. The demo user is `demo-user-1`, identified by a request header, which the server only honours when you set `ALLOW_DEMO_AUTH=true` in `.env.local` (it is `false` in `.env.example`; restart `npm run dev` after changing it). The server logs a `demo_auth_enabled` warning at startup when it is on.
 
 ```bash
 ent() { curl -s localhost:3000/api/entitlement -H 'x-demo-user-id: demo-user-1'; echo; }
@@ -111,7 +111,7 @@ Event ids are remembered, so use fresh `--id` values (or delete `data/billing.db
 | `PAST_DUE_GRACE_DAYS` | no | `7` | Days a `past_due` subscription keeps pro access. Fractions allowed, `0` disables the grace period. |
 | `BILLING_STORE` | no | `sqlite` | `sqlite` or `memory` (the in-memory store loses state on restart). |
 | `DATABASE_PATH` | no | `./data/billing.db` | SQLite file; parent directories are created. |
-| `ALLOW_DEMO_AUTH` | no | unset | `true` trusts the `x-demo-user-id` / `x-demo-user-email` headers. Local demo only. |
+| `ALLOW_DEMO_AUTH` | no | `false` | `true` trusts the `x-demo-user-id` / `x-demo-user-email` headers as the signed-in user. Local demo only: with `NODE_ENV=production` (what `next start` uses) it is refused, billing routes answer `500 billing_not_configured`, and the log says why. |
 
 Invalid or missing values do not crash the server: every API route answers `500 {"error":"billing_not_configured"}` and the server log lists each problem.
 
@@ -182,7 +182,9 @@ The owner of a subscription event is the user linked to its Stripe customer, fal
 
 ## Authentication
 
-Billing needs to know who is signed in, and this repository deliberately does not pick an auth library. `src/lib/auth.ts` defines `AuthResolver = (request) => Promise<{ id, email? } | null>`. By default nobody is signed in and every user-facing route answers `401`. Wire your session lookup in `src/lib/container.ts` (the `auth:` line), replacing `denyAll`. `ALLOW_DEMO_AUTH=true` swaps in header-based auth for local development: anyone can send those headers, so never enable it where real users can reach the app.
+Billing needs to know who is signed in, and this repository deliberately does not pick an auth library. `src/lib/auth.ts` defines `AuthResolver = (request) => Promise<{ id, email? } | null>`. By default nobody is signed in and every user-facing route answers `401`. Wire your session lookup in `src/lib/container.ts` (the `auth:` line), replacing `denyAll`.
+
+`ALLOW_DEMO_AUTH=true` swaps in header-based auth for local development. Anyone can send those headers and be treated as any user, so it must never be used in production. Two guards back that up: `.env.example` ships it as `false`, and `loadConfig` refuses `ALLOW_DEMO_AUTH=true` when `NODE_ENV=production`, so billing routes answer `500 billing_not_configured` instead of starting with it. When it is enabled in any other environment the server logs a `demo_auth_enabled` warning at startup. The guard keys off `NODE_ENV`, which Next.js sets to `production` for `next start`; if you deploy another way, make sure `NODE_ENV=production` is set.
 
 ## Stripe Tax setup checklist
 

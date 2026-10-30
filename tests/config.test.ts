@@ -94,6 +94,28 @@ describe('loadConfig', () => {
   ])('rejects %j', (extra, message) => {
     expect(problemsFor({ ...valid, ...extra })).toEqual([message]);
   });
+
+  describe('ALLOW_DEMO_AUTH', () => {
+    it('is refused in production, with a message that says why', () => {
+      const problems = problemsFor({ ...valid, ALLOW_DEMO_AUTH: 'true', NODE_ENV: 'production' });
+      expect(problems).toHaveLength(1);
+      expect(problems[0]).toMatch(/^ALLOW_DEMO_AUTH=true is not allowed when NODE_ENV=production/);
+    });
+
+    it('is reported together with other configuration problems', () => {
+      const problems = problemsFor({ ...valid, STRIPE_SECRET_KEY: '', ALLOW_DEMO_AUTH: 'true', NODE_ENV: 'production' });
+      expect(problems).toHaveLength(2);
+      expect(problems[0]).toBe('STRIPE_SECRET_KEY is required');
+    });
+
+    it.each(['development', 'test', undefined])('is accepted when NODE_ENV is %s', (nodeEnv) => {
+      expect(loadConfig({ ...valid, ALLOW_DEMO_AUTH: 'true', NODE_ENV: nodeEnv }).allowDemoAuth).toBe(true);
+    });
+
+    it.each([undefined, 'false', 'TRUE', '1'])('is off in production when set to %s', (value) => {
+      expect(loadConfig({ ...valid, ALLOW_DEMO_AUTH: value, NODE_ENV: 'production' }).allowDemoAuth).toBe(false);
+    });
+  });
 });
 
 describe('auth resolvers', () => {

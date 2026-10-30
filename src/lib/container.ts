@@ -22,6 +22,13 @@ async function createRepository(store: AppConfig['store']): Promise<BillingRepos
 
 export async function createDepsFromEnv(env: Record<string, string | undefined>): Promise<BillingDeps> {
   const config = loadConfig(env);
+  if (config.allowDemoAuth) {
+    consoleLogger.warn('demo_auth_enabled', {
+      warning:
+        'ALLOW_DEMO_AUTH=true: any client can act as any user by sending an x-demo-user-id header. ' +
+        'Local development only; never enable this where real users can reach the app.',
+    });
+  }
   return {
     stripe: new Stripe(config.stripeSecretKey, {
       maxNetworkRetries: 2,

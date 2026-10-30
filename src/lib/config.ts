@@ -68,6 +68,14 @@ export function loadConfig(env: Env): AppConfig {
     problems.push('BILLING_STORE must be "sqlite" or "memory"');
   }
 
+  const allowDemoAuth = env.ALLOW_DEMO_AUTH === 'true';
+  if (allowDemoAuth && env.NODE_ENV === 'production') {
+    problems.push(
+      'ALLOW_DEMO_AUTH=true is not allowed when NODE_ENV=production: it accepts client-supplied headers as the signed-in user. ' +
+        'Unset it and wire a real AuthResolver (README, "Authentication").',
+    );
+  }
+
   if (problems.length > 0) throw new ConfigError(problems);
 
   return {
@@ -77,6 +85,6 @@ export function loadConfig(env: Env): AppConfig {
     pastDueGraceDays,
     stripeSecretKey,
     store: storeKind === 'memory' ? { kind: 'memory' } : { kind: 'sqlite', path: env.DATABASE_PATH?.trim() || './data/billing.db' },
-    allowDemoAuth: env.ALLOW_DEMO_AUTH === 'true',
+    allowDemoAuth,
   };
 }
