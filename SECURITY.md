@@ -20,42 +20,10 @@ This repository is a starter. Things that matter when you build on it:
 
 ## Dependency policy
 
-- Every dependency is pinned to an exact version, and no package version in `package-lock.json` (direct or transitive) was published less than 30 days before the date it was locked. Locking is done with `npm install --before=<cutoff date>`; Dependabot is configured with a 30-day `cooldown` for the same reason.
+- Every dependency is pinned to an exact version, and no package version in `package-lock.json` (direct or transitive) was published less than 7 days before the date it was locked (current cutoff: 2026-10-23). Locking is done with `npm install --before=<cutoff date>`; Dependabot is configured with a 7-day `cooldown` for the same reason.
+- Installs, tests, type checks and builds run in a throwaway container, never directly on a developer machine, and installs use `--ignore-scripts` (`npm ci --ignore-scripts` in CI), so package install scripts never run. No dependency needs an install script here (`fsevents` is an optional macOS file-watcher with a script that is not required).
 - GitHub Actions in `.github/workflows` are pinned to full commit SHAs of releases that are also older than the cutoff, and the workflow token is read-only (`permissions: contents: read`).
 
 ## Open advisories
 
-Status as of 2026-10-30 from `npm audit` (full and `--omit=dev`). The fixed versions of the packages below were published after the dependency cutoff of 2026-09-30, so they are deliberately **not** taken yet. Each entry says whether this repository is reachable. Re-check when the fixed versions are older than 30 days; the Dependabot configuration will propose them.
-
-### Production dependency: `next@16.3.7` (fixed in 16.3.8 and later, published 2026-09-30 or later)
-
-`npm audit --omit=dev` reports `next` as critical. Reachability for this repository, which has one App Router page, four route handlers, no `next/image`, no images configuration, no Server Actions and no Cache Components:
-
-| Advisory | Condition for impact | Reachable here? |
-| --- | --- | --- |
-| [GHSA-2464-fhr4-w9xw](https://github.com/advisories/GHSA-2464-fhr4-w9xw) (critical, RCE in Image Optimization) | A vulnerable `sharp` used by Next.js's image optimizer. The advisory's workaround is `sharp` >= 0.35.5. | Mitigated per the advisory's workaround: the lockfile resolves `sharp@0.35.5`. The app also uses no images. |
-| [GHSA-673q-mjm6-r5xr](https://github.com/advisories/GHSA-673q-mjm6-r5xr) (critical, RCE in `use cache`) | A `use cache` function (Cache Components) returning typed arrays. | No. No `use cache` and no `cacheComponents` in the code or in `next.config.ts`. |
-| [GHSA-p3m5-59mp-jv5r](https://github.com/advisories/GHSA-p3m5-59mp-jv5r) (high, DoS) | At least one Server Action in an App Router app. | No. No Server Actions. |
-| [GHSA-cjq9-62q9-8jv4](https://github.com/advisories/GHSA-cjq9-62q9-8jv4) (high, SSRF in Image Optimization) | `images.remotePatterns` configured with an untrusted host. | No. No `images` configuration. |
-| [GHSA-3w37-wq28-93x7](https://github.com/advisories/GHSA-3w37-wq28-93x7), [GHSA-h694-7cp9-m8p3](https://github.com/advisories/GHSA-h694-7cp9-m8p3) (medium, `use cache` leaks) | Cache Components enabled. | No. |
-| [GHSA-4jqv-mc3x-m676](https://github.com/advisories/GHSA-4jqv-mc3x-m676), [GHSA-mcj8-r9mp-w47p](https://github.com/advisories/GHSA-mcj8-r9mp-w47p) (medium, SSG/ISR cache poisoning) | Pages Router SSG/ISR pages, or a root catch-all page together with SSG/ISR routes. | No. No Pages Router, no catch-all route, no ISR. |
-| [GHSA-f87g-xv8r-7p7x](https://github.com/advisories/GHSA-f87g-xv8r-7p7x) (medium, metadata image routes) | Metadata image routes such as `opengraph-image` on dynamic segments. | No. None exist. |
-| [GHSA-39w2-rjm5-chcv](https://github.com/advisories/GHSA-39w2-rjm5-chcv) (low, dev-server MCP endpoint) | Running `next dev` while visiting a malicious website. | Development only; production does not serve the endpoint. Do not browse untrusted sites while `npm run dev` is running. |
-
-Because the exposure depends on features this repository does not use, adding any of them (images, Server Actions, `use cache`, ISR) means upgrading Next.js first.
-
-### Production dependency (build time): `source-map-js@1.2.1` (fixed in 1.2.2, published 2026-09-30)
-
-[GHSA-68fv-2mgg-jv7q](https://github.com/advisories/GHSA-68fv-2mgg-jv7q) (high): event-loop denial of service from an attacker-supplied indexed source map. It is a transitive dependency of `postcss`, which both Next.js and Vite use. The code path needs an attacker to supply a source map to the process that parses it; this app does not parse user-supplied source maps at runtime. Not reachable.
-
-### Development-only dependencies: `vitest@5.0.2` (and `@vitest/mocker`) and `vite@8.3.1`
-
-These are used only by `npm test` (`vitest run`). They are not installed in a production image that uses `npm ci --omit=dev`, and they never serve traffic.
-
-| Advisory | Condition | Reachable here? |
-| --- | --- | --- |
-| [GHSA-qxg6-89mg-rqv8](https://github.com/advisories/GHSA-qxg6-89mg-rqv8), [GHSA-xp26-3454-mjgp](https://github.com/advisories/GHSA-xp26-3454-mjgp) (`@vitest/mocker`, medium; fixed in 5.0.3, published 2026-09-30) | A client that can reach a Vite dev server WebSocket with the mocker interceptor. | Only while a Vite dev server is reachable. This repository's scripts run `vitest run` and start no `vite` dev server, Vitest UI or browser mode. |
-| [GHSA-9jrq-w75r-8gcw](https://github.com/advisories/GHSA-9jrq-w75r-8gcw), [GHSA-rq7h-c2jc-7f22](https://github.com/advisories/GHSA-rq7h-c2jc-7f22), [GHSA-vfpm-58rq-9qcg](https://github.com/advisories/GHSA-vfpm-58rq-9qcg) (`vite`, low/medium) | A Vite dev server, exposed to the network for two of them. | No Vite dev server is started or exposed by this repository's scripts. |
-| [GHSA-698v-4r3x-3vcv](https://github.com/advisories/GHSA-698v-4r3x-3vcv), [GHSA-r825-w8mm-5pxw](https://github.com/advisories/GHSA-r825-w8mm-5pxw), [GHSA-587h-7wmj-h5pm](https://github.com/advisories/GHSA-587h-7wmj-h5pm) (`launch-editor` via `vite`, medium/high) | Opening files in an editor from a dev server; two of the three also require Windows. | No dev server, no "open in editor" flow. |
-
-Alternatives were tried: `vitest@4.1.11` with `vite@8.2.2` (both inside the cutoff) is flagged by the same advisories, so no combination that satisfies the cutoff avoids them.
+Status as of 2026-10-30: `npm audit` and `npm audit --omit=dev` report 0 vulnerabilities for the locked tree (`next@16.4.2`, `vitest@5.0.5`, `vite@8.3.5`, `source-map-js@1.2.2`). The advisories previously listed here (Next.js 16.3.7 image optimization, `use cache`, Server Actions, SSG/ISR cache poisoning, Draft Mode; `source-map-js` 1.2.1; `@vitest/mocker` and `vite` dev-server issues) are fixed by the versions now locked. There are no open advisories.
