@@ -213,6 +213,10 @@ Billing needs to know who is signed in, and this repository deliberately does no
 - [ ] Test with Stripe's [tax testing guide](https://docs.stripe.com/tax/testing); the calculated amount is `total_details.amount_tax` on the Checkout Session.
 - [ ] When you go live, switch to live-mode API keys and a live webhook endpoint, which has its own signing secret.
 
+## Reviewing an existing setup
+
+[docs/billing-review-checklist.md](docs/billing-review-checklist.md) is a checklist for a read-only review of a Stripe subscription or membership setup that is already running (keys and environments, Checkout, webhooks, retries and failed payments, the Customer Portal, tax, proration, cancellation, reconciliation, test versus live). For each check it says what this starter does and what it does not implement, so the starter can serve as a reference point; it does not inspect a Stripe account itself.
+
 ## Tests
 
 ```bash
@@ -251,6 +255,7 @@ src/
   app/api/**/route.ts          thin Next.js route files
   app/page.tsx                 local demo page
 scripts/send-test-event.mjs    signed local webhook sender
+docs/billing-review-checklist.md
 tests/
 ```
 
