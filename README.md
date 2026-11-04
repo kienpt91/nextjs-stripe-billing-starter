@@ -269,6 +269,10 @@ tests/
 - A reviewed false positive can be listed in `.secret-scan-allow`, one line per file and rule: `<path> <rule>  # reason`. A single line can be allowed with the inline marker `secret-scan: allow`. Keep entries specific and never allow a real credential.
 - If a secret is ever committed, rotate it first (assume it is compromised), then remove it from history.
 
+## Releasing
+
+Releases are cut by pushing a `vMAJOR.MINOR.PATCH` tag. The `release` workflow then verifies the code, builds the files, writes `SHA256SUMS`, attests where they were built and creates the GitHub release. See [RELEASING.md](RELEASING.md) for how to cut a release and how to verify a download with `gh attestation verify`.
+
 ## License
 
 MIT, see [LICENSE](LICENSE).
